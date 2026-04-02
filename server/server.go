@@ -4,9 +4,10 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/hmcts/server/internal/database"
-	"github.com/hmcts/server/internal/handler"
 	"github.com/rs/cors"
+
+	handler "github.com/LiviTT/HMCTS/internal/api"
+	"github.com/LiviTT/HMCTS/internal/database"
 )
 
 func main() {

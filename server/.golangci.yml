@@ -1,0 +1,68 @@
+version: "2"
+linters:
+  enable:
+    - gocyclo
+    - gosec
+    - revive
+  settings:
+    revive:
+      enable-all-rules: true
+      rules:
+        - name: add-constant
+          disabled: true
+        - name: cognitive-complexity
+          arguments:
+            - 13
+          exclude:
+            - '**/*_test.go'
+        - name: function-length
+          arguments:
+            - 100
+            - 0
+          exclude:
+            - '**/*_test.go'
+        - name: cyclomatic
+          arguments:
+            - 13
+          exclude:
+            - '**/*_test.go'
+        - name: line-length-limit
+          disabled: true
+        - name: max-public-structs
+          arguments:
+            - 10
+          exclude:
+            - '**/*_test.go'
+        - name: function-result-limit
+          arguments:
+            - 4
+          exclude:
+            - '**/*_test.go'
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - revive
+        source: '^//go:generate '
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/LiviTT/HMCTS
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

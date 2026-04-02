@@ -1,0 +1,63 @@
+name: Go Lint & Test
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: "Name"
+        type: string
+        required: true
+      working-directory:
+        description: "Working directory"
+        type: string
+        required: true
+      go-version:
+        description: "Go version"
+        type: string
+        default: "1.25"
+      golangci-lint-version:
+        description: "golangci-lint version"
+        type: string
+        default: v2.5
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    if: github.ref_type == 'branch'
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Go setup & lint
+        uses: ./.github/actions/go-setup-lint
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          go-version: ${{ inputs.go-version }}
+          golangci-lint-version: ${{ inputs.golangci-lint-version }}
+
+  test:
+    if: github.ref_type == 'branch'
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Go setup
+        uses: ./.github/actions/go-setup
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          go-version: ${{ inputs.go-version }}
+
+      - name: Run tests
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          make ci
