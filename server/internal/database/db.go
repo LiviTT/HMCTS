@@ -6,17 +6,23 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/LiviTT/HMCTS/internal/model"
 )
 
 type DB struct {
 	conn *sql.DB
 }
 
-func New(path string) (*DB, error) {
-	conn, err := sql.Open("sqlite3", path)
+func New(connStr string) (*DB, error) {
+	conn, err := sql.Open("pgx", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
+	}
+
+	if err := conn.Ping(); err != nil {
+		return nil, fmt.Errorf("connecting to database: %w", err)
 	}
 
 	db := &DB{conn: conn}
@@ -29,22 +35,27 @@ func New(path string) (*DB, error) {
 
 func (db *DB) migrate() error {
 	_, err := db.conn.Exec(`
+		DO $$ BEGIN
+			CREATE TYPE task_status AS ENUM ('todo', 'in_progress', 'complete');
+		EXCEPTION WHEN duplicate_object THEN NULL;
+		END $$;
+
 		CREATE TABLE IF NOT EXISTS tasks (
-			id          TEXT PRIMARY KEY,
+			id          UUID PRIMARY KEY,
 			title       TEXT NOT NULL,
 			description TEXT,
-			status      TEXT NOT NULL,
-			due_date    DATETIME NOT NULL,
-			created_at  DATETIME NOT NULL,
-			updated_at  DATETIME NOT NULL
+			status      TASK_STATUS NOT NULL,
+			due_date    TIMESTAMP WITH TIME ZONE NOT NULL,
+			created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT current_timestamp,
+			updated_at  TIMESTAMP WITH TIME ZONE
 		)
 	`)
 	return err
 }
 
-func (db *DB) CreateTask(input model.CreateTaskInput) (*model.Task, error) {
-	task := &model.Task{
-		ID:          uuid.New().String(),
+func (db *DB) CreateTask(input model.CreateTaskRequest) (*model.Task, error) {
+	t := &model.Task{
+		ID:          uuid.New(),
 		Title:       input.Title,
 		Description: input.Description,
 		Status:      input.Status,
@@ -55,21 +66,21 @@ func (db *DB) CreateTask(input model.CreateTaskInput) (*model.Task, error) {
 
 	_, err := db.conn.Exec(`
 		INSERT INTO tasks (id, title, description, status, due_date, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		task.ID, task.Title, task.Description, string(task.Status),
-		task.DueDate, task.CreatedAt, task.UpdatedAt,
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		t.ID, t.Title, t.Description, string(t.Status),
+		t.DueDate, t.CreatedAt, t.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("inserting task: %w", err)
 	}
 
-	return task, nil
+	return t, nil
 }
 
 func (db *DB) GetTaskByID(id string) (*model.Task, error) {
 	row := db.conn.QueryRow(`
 		SELECT id, title, description, status, due_date, created_at, updated_at
-		FROM tasks WHERE id = ?`, id)
+		FROM tasks WHERE id = $1`, id)
 
 	return scanTask(row)
 }
@@ -85,11 +96,11 @@ func (db *DB) GetAllTasks() ([]*model.Task, error) {
 
 	var tasks []*model.Task
 	for rows.Next() {
-		task, err := scanTaskRow(rows)
+		t, err := scanTaskRow(rows)
 		if err != nil {
 			return nil, err
 		}
-		tasks = append(tasks, task)
+		tasks = append(tasks, t)
 	}
 
 	return tasks, rows.Err()
@@ -97,38 +108,41 @@ func (db *DB) GetAllTasks() ([]*model.Task, error) {
 
 func (db *DB) UpdateTaskStatus(id string, status model.TaskStatus) (*model.Task, error) {
 	now := time.Now().UTC()
-	_, err := db.conn.Exec(`
-		UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`,
+	result, err := db.conn.Exec(`
+		UPDATE tasks SET status = $1, updated_at = $2 WHERE id = $3`,
 		string(status), now, id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("updating task status: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return nil, fmt.Errorf("task not found: %s", id)
 	}
 
 	return db.GetTaskByID(id)
 }
 
 func (db *DB) DeleteTask(id string) error {
-	result, err := db.conn.Exec(`DELETE FROM tasks WHERE id = ?`, id)
+	result, err := db.conn.Exec(`DELETE FROM tasks WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("deleting task: %w", err)
 	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
 		return fmt.Errorf("task not found: %s", id)
 	}
 	return nil
 }
 
-// scanTask scans a single *sql.Row
 func scanTask(row *sql.Row) (*model.Task, error) {
-	var task model.Task
+	var t model.Task
 	var description sql.NullString
 	var status string
 
 	err := row.Scan(
-		&task.ID, &task.Title, &description, &status,
-		&task.DueDate, &task.CreatedAt, &task.UpdatedAt,
+		&t.ID, &t.Title, &description, &status,
+		&t.DueDate, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found")
@@ -138,29 +152,28 @@ func scanTask(row *sql.Row) (*model.Task, error) {
 	}
 
 	if description.Valid {
-		task.Description = &description.String
+		t.Description = &description.String
 	}
-	task.Status = model.TaskStatus(status)
-	return &task, nil
+	t.Status = model.TaskStatus(status)
+	return &t, nil
 }
 
-// scanTaskRow scans from *sql.Rows
 func scanTaskRow(rows *sql.Rows) (*model.Task, error) {
-	var task model.Task
+	var t model.Task
 	var description sql.NullString
 	var status string
 
 	err := rows.Scan(
-		&task.ID, &task.Title, &description, &status,
-		&task.DueDate, &task.CreatedAt, &task.UpdatedAt,
+		&t.ID, &t.Title, &description, &status,
+		&t.DueDate, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scanning task row: %w", err)
 	}
 
 	if description.Valid {
-		task.Description = &description.String
+		t.Description = &description.String
 	}
-	task.Status = model.TaskStatus(status)
-	return &task, nil
+	t.Status = model.TaskStatus(status)
+	return &t, nil
 }

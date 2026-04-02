@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/hmcts/server/internal/database"
-	"github.com/hmcts/server/internal/model"
+	"github.com/LiviTT/HMCTS/internal/database"
+	"github.com/LiviTT/HMCTS/internal/model"
 )
 
 type Handler struct {
@@ -72,6 +72,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 
 // GET /api/tasks
 func (h *Handler) listTasks(w http.ResponseWriter, _ *http.Request) {
+	var tasks []*model.Task
 	tasks, err := h.db.GetAllTasks()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to retrieve tasks")

@@ -8,9 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hmcts/task-manager/database"
-	"github.com/hmcts/task-manager/handler"
-	"github.com/hmcts/task-manager/model"
+	"fmt"
+
+	"github.com/google/uuid"
+
+	handler "github.com/LiviTT/HMCTS/internal/api"
+	"github.com/LiviTT/HMCTS/internal/database"
+	"github.com/LiviTT/HMCTS/internal/model"
 )
 
 func newTestServer(t *testing.T) *httptest.Server {
@@ -82,7 +86,7 @@ func TestCreateTask_Success(t *testing.T) {
 
 	var task model.Task
 	_ = json.NewDecoder(resp.Body).Decode(&task)
-	if task.ID == "" {
+	if task.ID == uuid.Nil {
 		t.Error("expected task to have an ID")
 	}
 	if task.Title != "My Task" {
@@ -127,7 +131,8 @@ func TestGetTask_Success(t *testing.T) {
 
 	created := createTestTask(t, srv.URL)
 
-	resp, _ := http.Get(srv.URL + "/api/tasks/" + created.ID)
+	reqString := fmt.Sprintf("%s/api/tasks/%s", srv.URL, created.ID)
+	resp, _ := http.Get(reqString)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -150,10 +155,11 @@ func TestUpdateStatus_Success(t *testing.T) {
 	defer srv.Close()
 
 	created := createTestTask(t, srv.URL)
+	reqString := fmt.Sprintf("%s/api/tasks/%s/status", srv.URL, created.ID)
 
 	body, _ := json.Marshal(map[string]string{"status": "IN_PROGRESS"})
 	req, _ := http.NewRequest(http.MethodPatch,
-		srv.URL+"/api/tasks/"+created.ID+"/status",
+		reqString,
 		bytes.NewReader(body),
 	)
 	req.Header.Set("Content-Type", "application/json")
@@ -177,7 +183,8 @@ func TestDeleteTask_Success(t *testing.T) {
 
 	created := createTestTask(t, srv.URL)
 
-	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/tasks/"+created.ID, nil)
+	reqString := fmt.Sprintf("%s/api/tasks/%s", srv.URL, created.ID)
+	req, _ := http.NewRequest(http.MethodDelete, reqString, nil)
 	resp, _ := http.DefaultClient.Do(req)
 
 	if resp.StatusCode != http.StatusNoContent {
@@ -185,7 +192,7 @@ func TestDeleteTask_Success(t *testing.T) {
 	}
 
 	// Confirm it's gone
-	get, _ := http.Get(srv.URL + "/api/tasks/" + created.ID)
+	get, _ := http.Get(reqString)
 	if get.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404 after delete, got %d", get.StatusCode)
 	}
